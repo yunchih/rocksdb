@@ -150,7 +150,9 @@ public:
            const std::string &dev_name,
            const std::vector<int> &punits,
            const std::string& mpath,
-           size_t rate);
+           size_t rate,
+           const std::string &mapping,
+           size_t height);
 
   ~NvmStore(void);
 
@@ -162,6 +164,8 @@ public:
   struct nvm_dev *GetDev(void) const { return dev_; }
   std::string GetDevName(void) const { return dev_name_; }
   std::string GetDevPath(void) const { return dev_path_; }
+  std::string GetMapping(void) const { return mapping_; }
+  size_t GetHeight(void) const { return height_; }
 
   size_t GetPunitCount(void) const { return punits_.size(); }
 
@@ -181,9 +185,12 @@ protected:
   std::vector<struct nvm_addr> punits_;
   std::string mpath_;
   size_t rate_;
+  std::string mapping_;
+  size_t height_;
 
   port::Mutex mutex_;
   uint16_t curs_;
+  uint16_t nblocks_;
   std::deque<struct nvm_vblk*> reserved_;
 
   std::deque<std::pair<BlkState, struct nvm_vblk*>> blks_;
@@ -234,7 +241,7 @@ public:
   Status wmeta(void);
   std::string txt(void) const;
 
-  port::Mutex read_mutex_;
+  port::RWMutex read_mutex_;
 
 private:
   ~NvmFile(void);               // Unref eventually deletes the object
@@ -665,8 +672,7 @@ private:
   std::string uri_;
 
   std::map<std::string, std::vector<NvmFile*>> fs_;
-  port::Mutex fs_mutex_; // Serializing lookup, creation, and deletion
-
+  port::RWMutex fs_mutex_; // Serializing lookup, creation, and deletion
 };
 
 //
@@ -704,6 +710,8 @@ public:
     NVM_DBG(file_, "forwarding (fill buffers + read buffers)");
 
     Status s;
+
+    ReadLock lock(&file_->read_mutex_);
 
     NVM_DBG(file_, "forwarding");
     s = file_->Read(pos_, n, result, scratch);
@@ -772,7 +780,7 @@ public:
   ) const override {
     NVM_DBG(file_, "forwarding");
 
-    MutexLock lock(&file_->read_mutex_);
+    ReadLock lock(&file_->read_mutex_);
 
     Status s;
 
@@ -862,6 +870,8 @@ public:
   virtual Status Append(const Slice& slice) override {
     NVM_DBG(this, "forwarding...");
 
+    WriteLock lock(&file_->read_mutex_);
+
     return file_->Append(slice);
   }
 
@@ -876,6 +886,8 @@ public:
   // writes. The behavior is undefined if called with other writes to follow.
   virtual Status Truncate(uint64_t size) override {
     NVM_DBG(this, "forwarding");
+
+    WriteLock lock(&file_->read_mutex_);
 
     if (!truncated_) {
       truncated_ = true;
@@ -899,6 +911,8 @@ public:
 
   virtual Status Flush(void) override {
     NVM_DBG(this, "forwarding");
+
+    WriteLock lock(&file_->read_mutex_);
 
     return file_->Flush();
   }
@@ -981,7 +995,7 @@ public:
   virtual Status RangeSync(uint64_t offset, uint64_t nbytes) override {
     NVM_DBG(this, "forwarding");
 
-    return file_->RangeSync(offset, nbytes);;
+    return file_->RangeSync(offset, nbytes);
   }
 
   // PrepareWrite performs any necessary preparation for a write

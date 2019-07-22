@@ -12,7 +12,7 @@ namespace rocksdb {
 
 static std::string kUriPrefix("nvm://");
 
-static std::regex kNvmUri("nvm://punits:([[:digit:],\\-]+)@([[:alnum:]]+)(/.*)");
+static std::regex kNvmUri("nvm://punits:([[:digit:],\\-]+)@([0-9])-([0-9])%([[:alnum:]]+)(/.*)");
 static std::regex kNvmUriPunits("(([[:digit:]]+)-([[:digit:]]+))|([[:digit:]]+)");
 
 static Registrar<Env> nvm_reg("nvm://.*", [](const std::string& uri,
@@ -34,12 +34,21 @@ EnvNVM::EnvNVM(
   }
 
   std::string punits_m(match[1].str());
-  std::string dev_name_m(match[2].str());
-  std::string path_m(match[3].str());
+  std::string mapping_m(match[2].str());
+  std::string height_m(match[3].str());
+  std::string dev_name_m(match[4].str());
+  std::string path_m(match[5].str());
 
   NVM_DBG(this, "punits_m: " << punits_m);
+  NVM_DBG(this, "mapping_m: " << mapping_m);
+  NVM_DBG(this, "height_m: " << height_m);
   NVM_DBG(this, "dev_name_m: " << dev_name_m);
   NVM_DBG(this, "path_m: " << path_m);
+
+  if (mapping_m != "1" && mapping_m != "2") {
+    NVM_DBG(this, "Invalid mapping");
+    throw std::runtime_error("Invalid mapping");
+  }
 
   std::vector<int> punits;                      // Parse punits into vector
 
@@ -66,7 +75,7 @@ EnvNVM::EnvNVM(
 
   NVM_DBG(this, "mpath: " << mpath.txt());
 
-  store_ = new NvmStore(this, dev_name_m, punits, mpath.fpath(), 10);
+  store_ = new NvmStore(this, dev_name_m, punits, mpath.fpath(), 10, mapping_m, std::stoi(height_m));
 }
 
 EnvNVM::~EnvNVM(void) {
@@ -88,7 +97,7 @@ Status EnvNVM::NewSequentialFile(
     return posix_->NewSequentialFile(fpath, result, options);
   }
 
-  MutexLock lock(&fs_mutex_);
+  WriteLock lock(&fs_mutex_);
 
   NvmFile *file = FindFileUnguarded(info);
   if (!file) {
@@ -113,7 +122,7 @@ Status EnvNVM::NewRandomAccessFile(
     return posix_->NewRandomAccessFile(fpath, result, options);
   }
 
-  MutexLock lock(&fs_mutex_);
+  WriteLock lock(&fs_mutex_);
 
   NvmFile *file = FindFileUnguarded(info);
   if (!file) {
@@ -155,7 +164,7 @@ Status EnvNVM::NewWritableFile(
     return posix_->NewWritableFile(fpath, result, options);
   }
 
-  MutexLock lock(&fs_mutex_);
+  WriteLock lock(&fs_mutex_);
 
   NvmFile *file;
 
@@ -224,7 +233,7 @@ Status EnvNVM::DeleteFile(const std::string& fpath) {
     return posix_->FileExists(fpath);
   }
 
-  MutexLock lock(&fs_mutex_);
+  WriteLock lock(&fs_mutex_);
 
   return DeleteFileUnguarded(info);
 }
@@ -239,7 +248,7 @@ Status EnvNVM::FileExists(const std::string& fpath) {
     return posix_->FileExists(fpath);
   }
 
-  MutexLock lock(&fs_mutex_);
+  ReadLock lock(&fs_mutex_);
   if (FindFileUnguarded(info)) {
     return Status::OK();
   }
@@ -255,7 +264,7 @@ Status EnvNVM::GetChildren(
 
   posix_->GetChildren(dpath, result);   // Merging posix and nvm
 
-  MutexLock lock(&fs_mutex_);
+  WriteLock lock(&fs_mutex_);
   for (auto file : fs_[dpath]) {
       result->push_back(file->GetFname());
   }
@@ -332,7 +341,7 @@ Status EnvNVM::GetFileSize(const std::string& fpath, uint64_t* fsize) {
     return posix_->GetFileSize(fpath, fsize);
   }
 
-  MutexLock lock(&fs_mutex_);
+  ReadLock lock(&fs_mutex_);
 
   NvmFile *file = FindFileUnguarded(info);
   if (!file) {
@@ -356,7 +365,7 @@ Status EnvNVM::GetFileModificationTime(
     return posix_->GetFileModificationTime(fpath, file_mtime);
   }
 
-  MutexLock lock(&fs_mutex_);
+  ReadLock lock(&fs_mutex_);
 
   return Status::IOError("GetFileModificationTime --> Not implemented");
 }
@@ -385,7 +394,7 @@ Status EnvNVM::RenameFile(
     return Status::IOError("Directory change not supported when renaming");
   }
 
-  MutexLock lock(&fs_mutex_);
+  ReadLock lock(&fs_mutex_);
 
   NvmFile *file = FindFileUnguarded(info_src);
   if (!file) {

@@ -35,7 +35,7 @@ namespace rocksdb {
 NvmFile::NvmFile(
   EnvNVM* env, const FPathInfo& info, const std::string mpath
 ) : env_(env), refs_(), info_(info), fsize_(), mpath_(mpath), align_nbytes_(),
-    stripe_nbytes_(), blk_nbytes_(), blks_(), lu_bound_(8) {
+    stripe_nbytes_(), blk_nbytes_(), blks_(), lu_bound_(64) {
   NVM_DBG(this, "mpath_:" << mpath_);
 
   struct nvm_dev *dev = env_->store_->GetDev();
@@ -71,12 +71,22 @@ NvmFile::NvmFile(
     }
   }
 
-  align_nbytes_ = geo->nplanes * geo->nsectors * geo->sector_nbytes;
-  stripe_nbytes_ = align_nbytes_ * env_->store_->GetPunitCount();
-  blk_nbytes_ = stripe_nbytes_ * geo->npages;
+  if (strcmp(env_->store_->GetMapping().c_str(), "1") == 0) {
+    align_nbytes_ = nvm_dev_get_ws_opt(dev) * geo->l.nbytes;
+    stripe_nbytes_ = align_nbytes_ * geo->l.npunit * geo->l.npugrp;
+    blk_nbytes_ = stripe_nbytes_ * (geo->l.nsectr / nvm_dev_get_ws_opt(dev));
 
-  buf_nbytes_ = 0;                              // Setup buffer
-  buf_nbytes_max_ = lu_bound_ * stripe_nbytes_;
+    buf_nbytes_ = 0; // Setup buffer
+    buf_nbytes_max_ = lu_bound_ * stripe_nbytes_;
+  } else if (strcmp(env_->store_->GetMapping().c_str(), "2") == 0) {
+    align_nbytes_ = nvm_dev_get_ws_opt(dev) * geo->l.nbytes;
+    stripe_nbytes_ = align_nbytes_ * geo->l.npunit;
+    blk_nbytes_ = stripe_nbytes_ * (geo->l.nsectr / nvm_dev_get_ws_opt(dev)) * env_->store_->GetHeight();
+
+    buf_nbytes_ = 0; // Setup buffer
+    buf_nbytes_max_ = lu_bound_ * stripe_nbytes_ * geo->l.npugrp;
+  }
+
   buf_ = (char*)nvm_buf_alloc(dev, buf_nbytes_max_, NULL);
   if (!buf_) {
     NVM_DBG(this, "FAILED: allocating buffer");
@@ -296,7 +306,7 @@ Status NvmFile::Append(const Slice& slice) {
 Status NvmFile::wmeta(void) {
   std::stringstream meta;
 
-  meta << std::to_string(fsize_) << std::endl;;
+  meta << std::to_string(fsize_) << std::endl;
 
   for (auto &blk : blks_) {
     if (!blk)
@@ -533,6 +543,12 @@ Status NvmFile::Read(
   size_t nbytes_read = 0;
   size_t read_offset = aligned_offset;
 
+  char *rbuf_ = (char *)nvm_buf_alloc(env_->store_->GetDev(), buf_nbytes_max_, NULL);
+  if (!rbuf_) {
+    NVM_DBG(this, "FAILED: allocating buffer");
+    throw std::runtime_error("FAILED: allocating buffer");
+  }
+
   while (nbytes_remaining > 0) {
     uint64_t blk_idx = read_offset / blk_nbytes_;
     uint64_t blk_offset = read_offset % blk_nbytes_;
@@ -544,14 +560,16 @@ Status NvmFile::Read(
     });
 
     NVM_DBG(this, "blk(" << blk << ")");
+    NVM_DBG(this, "blk_idx(" << blk_idx << ")");
     NVM_DBG(this, "blk_offset(" << blk_offset << ")");
+    NVM_DBG(this, "blk_size(" << nvm_vblk_get_nbytes(blk) << ")");
     NVM_DBG(this, "nbytes(" << nbytes << ")");
 
     NVM_DBG(this, "=nbytes_remaining(" << nbytes_remaining << ")");
     NVM_DBG(this, "=nbytes_read(" << nbytes_read << ")");
     NVM_DBG(this, "=read_offset(" << read_offset << ")");
 
-    ssize_t ret = nvm_vblk_pread(blk, buf_, nbytes, blk_offset);
+    ssize_t ret = nvm_vblk_pread(blk, rbuf_, nbytes, blk_offset);
     if (ret < 0) {
       perror("nvm_vblk_pread");
       NVM_DBG(this, "FAILED: nvm_vblk_read");
@@ -570,26 +588,26 @@ Status NvmFile::Read(
       ssize_t scratch_inc = n;
       NVM_DBG(this, "first && last, scratch_inc: " << scratch_inc);
 
-      memcpy(scratch, buf_ + skip_head_nbytes, scratch_inc);
+      memcpy(scratch, rbuf_ + skip_head_nbytes, scratch_inc);
 
     } else if (first) {
       ssize_t scratch_inc = nbytes - skip_head_nbytes;
       NVM_DBG(this, "first, scratch_inc: " << scratch_inc);
 
-      memcpy(scratch, buf_ + skip_head_nbytes, scratch_inc);
+      memcpy(scratch, rbuf_ + skip_head_nbytes, scratch_inc);
     } else if (last) {
       ssize_t scratch_inc = nbytes - (skip_tail_nbytes - skip_head_nbytes);
       ssize_t scratch_offz = nbytes_read - ret - skip_head_nbytes;
 
       NVM_DBG(this, "last, scratch_offz: " << scratch_offz << ", scratch_inc: " << scratch_inc);
 
-      memcpy(scratch + scratch_offz, buf_, scratch_inc);
+      memcpy(scratch + scratch_offz, rbuf_, scratch_inc);
     } else {
       ssize_t scratch_inc = nbytes;
       ssize_t scratch_offz = nbytes_read - ret - skip_head_nbytes;
       NVM_DBG(this, "middle, scratch_offz: " << scratch_offz << ", scratch_inc: " << scratch_inc);
 
-      memcpy(scratch + scratch_offz, buf_, scratch_inc);
+      memcpy(scratch + scratch_offz, rbuf_, scratch_inc);
     }
 
     NVM_DBG(this, "-nbytes_remaining(" << nbytes_remaining << ")");
@@ -601,8 +619,8 @@ Status NvmFile::Read(
 
   NVM_DBG(this, "exit");
 
+  nvm_buf_free(env_->store_->GetDev(), rbuf_);
   return Status::OK();
 }
 
 }       // namespace rocksdb
-
