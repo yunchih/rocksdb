@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "env_nvm.h"
 #include <exception>
 
@@ -17,9 +18,11 @@ NvmStore::NvmStore(
   const std::string& dev_name,
   const std::vector<int>& punits,
   const std::string& mpath,
-  size_t rate
-) : env_(env), dev_name_(dev_name), dev_path_("/dev/"+dev_name), mpath_(mpath),
-    rate_(rate), curs_(0) {
+  size_t rate,
+  const std::string& mapping,
+  size_t height
+) : env_(env), dev_name_(dev_name), dev_path_("/dev/" + dev_name), mpath_(mpath),
+    rate_(rate), mapping_(mapping), height_(height), curs_(0), nblocks_(0) {
   NVM_DBG(this, "Opening NvmStore");
 
   dev_ = nvm_dev_open(dev_path_.c_str());               // Open device
@@ -29,15 +32,37 @@ NvmStore::NvmStore(
   }
   geo_ = nvm_dev_get_geo(dev_);                         // Grab geometry
 
+  if ((punits.size() % geo_->l.npunit) != 0) {
+    NVM_DBG(this, "FAILED: invalid number of punits");
+    throw std::runtime_error("FAILED: invalid number of punits");
+  }
+
+  if ((punits[0] % geo_->l.npunit) != 0) {
+    NVM_DBG(this, "FAILED: invalid punits provided");
+    throw std::runtime_error("FAILED: invalid punits provided");
+  }
+
+  size_t groups = punits.size() / geo_->l.npunit;
+
   for (size_t i = 0; i < punits.size(); ++i) {          // Construct punit addrs
     struct nvm_addr addr;
 
     addr.ppa = 0;
-    addr.g.ch = punits[i] % geo_->nchannels;
-    addr.g.lun = (punits[i] / geo_->nchannels) % geo_->nluns;
+    addr.l.pugrp = (punits[i] % groups);
+    addr.l.punit = (punits[i] / groups) % geo_->l.npunit;
 
     punits_.push_back(addr);
   }
+
+  if (strcmp(mapping_.c_str(), "1") == 0) {
+    nblocks_ = geo_->l.nchunk;
+  } else if (strcmp(mapping_.c_str(), "2") == 0) {
+    nblocks_ = (((geo_->l.nchunk / height_) * groups) - geo_->l.nchunk % height_);
+  }
+
+  NVM_DBG(this, "height: " << height_);
+  NVM_DBG(this, "blocks: " << nblocks_);
+  NVM_DBG(this, "groups: " << groups);
 
   // TODO: Check for duplicates
 
@@ -52,26 +77,77 @@ NvmStore::NvmStore(
   }
 }
 
-Status NvmStore::recover(const std::string& mpath)
-{
+bool compareAddrs(const nvm_addr &a, const nvm_addr &b) {
+  if (a.l.chunk != b.l.chunk) {
+    return a.l.chunk < b.l.chunk;
+  }
+
+  if (a.l.pugrp != b.l.pugrp) {
+    return a.l.pugrp < b.l.pugrp;
+  }
+
+  if (a.l.punit != b.l.punit) {
+    return a.l.punit < b.l.punit;
+  }
+
+  return false;
+}
+
+Status NvmStore::recover(const std::string &mpath) {
   NVM_DBG(this, "mpath(" << mpath << ")");
 
   // Initialize and allocate vblks with defaults (kFree)
-  for (size_t blk_idx = 0; blk_idx < geo_->nblocks; ++blk_idx) {
-    struct nvm_vblk *blk;
+  if (strcmp(mapping_.c_str(), "1") == 0) {
+    for (size_t blk_idx = 0; blk_idx < nblocks_; ++blk_idx) {
+      struct nvm_vblk *blk;
 
-    std::vector<struct nvm_addr> addrs(punits_);
-    for (auto &addr : addrs)
-      addr.g.blk = blk_idx;
+      std::vector<struct nvm_addr> addrs(punits_);
+      for (auto &addr : addrs)
+        addr.l.chunk = blk_idx;
 
-    blk = nvm_vblk_alloc(dev_, addrs.data(), addrs.size());
+      blk = nvm_vblk_alloc(dev_, addrs.data(), addrs.size());
 
-    if (!blk) {
-      NVM_DBG(this, "FAILED: nvm_vblk_alloc_line");
-      return Status::IOError("FAILED: nvm_vblk_alloc_line");
+      if (!blk) {
+        NVM_DBG(this, "FAILED: nvm_vblk_alloc_line");
+        return Status::IOError("FAILED: nvm_vblk_alloc_line");
+      }
+
+      blks_.push_back(std::make_pair(kFree, blk));
     }
+  } else if (strcmp(mapping_.c_str(), "2") == 0) {
+    size_t groups = punits_.size() / geo_->l.npunit;
+    for (size_t blk_idx = 0;
+         blk_idx < (geo_->l.nchunk - (geo_->l.nchunk % height_));
+         blk_idx += height_) {
+      for (size_t grp_idx = 0; grp_idx < groups; ++grp_idx) {
+        struct nvm_vblk *blk;
 
-    blks_.push_back(std::make_pair(kFree, blk));
+        std::vector<struct nvm_addr> addrs;
+
+        for (size_t pu_idx = 0; pu_idx < geo_->l.npunit; ++pu_idx) {
+          for (size_t block_height = 0; block_height < height_;
+               ++block_height) {
+            struct nvm_addr addr;
+            addr.ppa = 0;
+            addr.l.pugrp = punits_[grp_idx + (groups * pu_idx)].l.pugrp;
+            addr.l.punit = punits_[grp_idx + (groups * pu_idx)].l.punit;
+            addr.l.chunk = blk_idx + block_height;
+            addrs.push_back(addr);
+          }
+        }
+
+        std::sort(addrs.begin(), addrs.end(), compareAddrs);
+
+        blk = nvm_vblk_alloc(dev_, addrs.data(), addrs.size());
+
+        if (!blk) {
+          NVM_DBG(this, "FAILED: nvm_vblk_alloc_line");
+          return Status::IOError("FAILED: nvm_vblk_alloc_line");
+        }
+
+        blks_.push_back(std::make_pair(kFree, blk));
+      }
+    }
   }
 
   if (!env_->posix_->FileExists(mpath).ok()) {          // DONE
@@ -156,7 +232,7 @@ Status NvmStore::recover(const std::string& mpath)
 
     for (blk_idx = 0; meta >> line; ++blk_idx) {
 
-      if ((blk_idx+1) > geo_->nblocks) {
+      if ((blk_idx+1) > nblocks_) {
         NVM_DBG(this, "FAILED: Block count exceeding geometry");
         return Status::IOError("FAILED: Block count exceeding geometry");
       }
@@ -178,11 +254,10 @@ Status NvmStore::recover(const std::string& mpath)
       }
     }
 
-    if (blk_idx != geo_->nblocks) {
+    if (blk_idx != nblocks_) {
       NVM_DBG(this, "FAILED: Insufficient block count");
       return Status::IOError("FAILED: Insufficient block count");
     }
-
   }
 
   return Status::OK();
@@ -234,8 +309,8 @@ struct nvm_vblk* NvmStore::get(void) {
   MutexLock lock(&mutex_);
   NVM_DBG(this, "LOCK !");
 
-  for (size_t i = 0; i < geo_->nblocks; ++i) {
-    const size_t blk_idx = curs_++ % geo_->nblocks;
+  for (size_t i = 0; i < nblocks_; ++i) {
+    const size_t blk_idx = curs_++ % nblocks_;
     std::pair<BlkState, struct nvm_vblk*> &entry = blks_[blk_idx];
 
     switch (entry.first) {
