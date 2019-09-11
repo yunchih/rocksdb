@@ -267,8 +267,6 @@ private:
   size_t buf_nbytes_max_;
 
   std::deque<struct nvm_vblk*> blks_;
-
-  size_t lu_bound_;
 };
 
 template<typename T>
