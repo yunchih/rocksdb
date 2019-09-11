@@ -35,7 +35,7 @@ namespace rocksdb {
 NvmFile::NvmFile(
   EnvNVM* env, const FPathInfo& info, const std::string mpath
 ) : env_(env), refs_(), info_(info), fsize_(), mpath_(mpath), align_nbytes_(),
-    stripe_nbytes_(), blk_nbytes_(), blks_(), lu_bound_(64) {
+    stripe_nbytes_(), blk_nbytes_(), blks_() {
   NVM_DBG(this, "mpath_:" << mpath_);
 
   struct nvm_dev *dev = env_->store_->GetDev();
@@ -71,21 +71,12 @@ NvmFile::NvmFile(
     }
   }
 
-  if (strcmp(env_->store_->GetMapping().c_str(), "1") == 0) {
-    align_nbytes_ = nvm_dev_get_ws_opt(dev) * geo->l.nbytes;
-    stripe_nbytes_ = align_nbytes_ * geo->l.npunit * geo->l.npugrp;
-    blk_nbytes_ = stripe_nbytes_ * (geo->l.nsectr / nvm_dev_get_ws_opt(dev));
+  align_nbytes_ = nvm_dev_get_ws_opt(dev) * geo->l.nbytes;
+  stripe_nbytes_ = align_nbytes_;
+  blk_nbytes_ = stripe_nbytes_ * (geo->l.nsectr / nvm_dev_get_ws_opt(dev)) * env_->store_->GetPunitCount();
 
-    buf_nbytes_ = 0; // Setup buffer
-    buf_nbytes_max_ = lu_bound_ * stripe_nbytes_;
-  } else if (strcmp(env_->store_->GetMapping().c_str(), "2") == 0) {
-    align_nbytes_ = nvm_dev_get_ws_opt(dev) * geo->l.nbytes;
-    stripe_nbytes_ = align_nbytes_ * geo->l.npunit;
-    blk_nbytes_ = stripe_nbytes_ * (geo->l.nsectr / nvm_dev_get_ws_opt(dev)) * env_->store_->GetHeight();
-
-    buf_nbytes_ = 0; // Setup buffer
-    buf_nbytes_max_ = lu_bound_ * stripe_nbytes_ * geo->l.npugrp;
-  }
+  buf_nbytes_ = 0; // Setup buffer
+  buf_nbytes_max_ = (geo->l.nsectr / nvm_dev_get_ws_opt(dev)) * stripe_nbytes_;
 
   buf_ = (char*)nvm_buf_alloc(dev, buf_nbytes_max_, NULL);
   if (!buf_) {
@@ -94,7 +85,6 @@ NvmFile::NvmFile(
   }
 
   NVM_DBG(this, "align_nbytes_(" << align_nbytes_ << ")");
-  NVM_DBG(this, "lu_bound_(" << lu_bound_ << ")");
   NVM_DBG(this, "stripe_nbytes_(" << stripe_nbytes_ << ")");
   NVM_DBG(this, "blk_nbytes_(" << blk_nbytes_ << ")");
   NVM_DBG(this, "buf_nbytes_(" << buf_nbytes_ << ")");
@@ -312,7 +302,7 @@ Status NvmFile::wmeta(void) {
     if (!blk)
       continue;
 
-    meta << nvm_vblk_get_addrs(blk)[0].g.blk << std::endl;
+    meta << nvm_vblk_get_addrs(blk)[0].l.chunk << std::endl;
   }
 
   std::string content = meta.str();
