@@ -165,9 +165,19 @@ public:
   std::string GetDevName(void) const { return dev_name_; }
   std::string GetDevPath(void) const { return dev_path_; }
   std::string GetMapping(void) const { return mapping_; }
-  size_t GetHeight(void) const { return height_; }
 
+  size_t GetHeight(void) const { return height_; }
   size_t GetPunitCount(void) const { return punits_.size(); }
+  size_t GetReadAlignment(void) const { return geo_->l.nbytes; }
+  size_t GetWriteAlignment(void) const { return nvm_dev_get_ws_opt(dev_) * geo_->l.nbytes; }
+  size_t GetChunkSize(void) const { return GetReadAlignment() * geo_->l.nsectr; }
+  size_t GetNumberOfChunksInBlock(void) const {
+    return (
+      strcmp(mapping_.c_str(), "2") == 0
+      ? (GetHeight() * geo_->l.npunit)
+      : GetPunitCount()
+    );
+  }
 
 protected:
 
@@ -259,7 +269,6 @@ private:
   std::string mpath_;
 
   size_t align_nbytes_;
-  size_t stripe_nbytes_;
   size_t blk_nbytes_;
 
   char *buf_;
