@@ -35,11 +35,10 @@ namespace rocksdb {
 NvmFile::NvmFile(
   EnvNVM* env, const FPathInfo& info, const std::string mpath
 ) : env_(env), refs_(), info_(info), fsize_(), mpath_(mpath), align_nbytes_(),
-    stripe_nbytes_(), blk_nbytes_(), blks_() {
+    blk_nbytes_(), blks_() {
   NVM_DBG(this, "mpath_:" << mpath_);
 
   struct nvm_dev *dev = env_->store_->GetDev();
-  const struct nvm_geo *geo = nvm_dev_get_geo(dev);
 
   if (env_->posix_->FileExists(mpath_).ok()) {          // Read meta from file
     std::string content;
@@ -71,12 +70,10 @@ NvmFile::NvmFile(
     }
   }
 
-  align_nbytes_ = nvm_dev_get_ws_opt(dev) * geo->l.nbytes;
-  stripe_nbytes_ = align_nbytes_;
-  blk_nbytes_ = stripe_nbytes_ * (geo->l.nsectr / nvm_dev_get_ws_opt(dev)) * env_->store_->GetPunitCount();
-
+  align_nbytes_ = env_->store_->GetWriteAlignment();
+  blk_nbytes_ = env_->store_->GetChunkSize() * env_->store_->GetNumberOfChunksInBlock();
   buf_nbytes_ = 0; // Setup buffer
-  buf_nbytes_max_ = (geo->l.nsectr / nvm_dev_get_ws_opt(dev)) * stripe_nbytes_;
+  buf_nbytes_max_ = env_->store_->GetChunkSize();
 
   buf_ = (char*)nvm_buf_alloc(dev, buf_nbytes_max_, NULL);
   if (!buf_) {
@@ -85,7 +82,6 @@ NvmFile::NvmFile(
   }
 
   NVM_DBG(this, "align_nbytes_(" << align_nbytes_ << ")");
-  NVM_DBG(this, "stripe_nbytes_(" << stripe_nbytes_ << ")");
   NVM_DBG(this, "blk_nbytes_(" << blk_nbytes_ << ")");
   NVM_DBG(this, "buf_nbytes_(" << buf_nbytes_ << ")");
   NVM_DBG(this, "buf_nbytes_max_(" << buf_nbytes_max_ << ")");
@@ -329,11 +325,11 @@ Status NvmFile::Flush(bool padded) {
     return Status::OK();
   }
 
-  if (padded && (buf_nbytes_ % stripe_nbytes_ != 0)) {
+  if (padded && (buf_nbytes_ % align_nbytes_ != 0)) {
     //size_t pad_nbytes = align_nbytes_ - (buf_nbytes_ % align_nbytes_);
-    pad_nbytes = stripe_nbytes_ - (buf_nbytes_ % stripe_nbytes_);
+    pad_nbytes = align_nbytes_ - (buf_nbytes_ % align_nbytes_);
 
-    NVM_DBG(this, "stripe_nbytes_: " << stripe_nbytes_);
+    NVM_DBG(this, "align_nbytes_: " << align_nbytes_);
     NVM_DBG(this, "pad_nbytes: " << pad_nbytes);
     NVM_DBG(this, "buf_nbytes_: " << buf_nbytes_);
 
@@ -349,7 +345,7 @@ Status NvmFile::Flush(bool padded) {
     return Status::OK();
   }*/
 
-  if (buf_nbytes_ < stripe_nbytes_) {
+  if (buf_nbytes_ < align_nbytes_) {
     NVM_DBG(this, "Nothing to flush (buffer less than striped_nbytes_)");
     return Status::OK();
   }
@@ -497,9 +493,11 @@ Status NvmFile::pad_last_block(void) {
 Status NvmFile::Read(
   uint64_t offset, size_t n, Slice* result, char* scratch
 ) const {
+  uint64_t align_nbytes_read = env_->store_->GetReadAlignment();
+
   NVM_DBG(this, "entry");
-  NVM_DBG(this, "offset(" << offset << ")-aligned(" << !(offset % align_nbytes_) << ")");
-  NVM_DBG(this, "n(" << n << ")-aligned(" << !(n % align_nbytes_) << ")");
+  NVM_DBG(this, "offset(" << offset << ")-aligned(" << !(offset % align_nbytes_read) << ")");
+  NVM_DBG(this, "n(" << n << ")-aligned(" << !(n % align_nbytes_read) << ")");
 
   // n is the MAX number of bytes to read, since it is the size of the scratch
   // memory. However, there might be n, less than n, or more than n bytes in the
@@ -510,7 +508,7 @@ Status NvmFile::Read(
   if (n > nbytes_from_offset)
     n = nbytes_from_offset;
 
-  NVM_DBG(this, "n(" << n << ")-aligned(" << !(n % align_nbytes_) << ")");
+  NVM_DBG(this, "n(" << n << ")-aligned(" << !(n % align_nbytes_read) << ")");
 
   if (n == 0) {
     NVM_DBG(this, "nothing left to read...");
@@ -519,12 +517,12 @@ Status NvmFile::Read(
   }
   // Now we know that: '0 < n <= nbytes_from_offset'
 
-  uint64_t aligned_offset = offset - offset % align_nbytes_;
-  uint64_t aligned_n = (((n + align_nbytes_ - 1) / align_nbytes_)) * align_nbytes_;
+  uint64_t aligned_offset = offset - offset % align_nbytes_read;
+  uint64_t aligned_n = (((offset % align_nbytes_read + n + align_nbytes_read - 1) / align_nbytes_read)) * align_nbytes_read;
   uint64_t skip_head_nbytes = offset - aligned_offset;
   uint64_t skip_tail_nbytes = aligned_n - n;
 
-  NVM_DBG(this, "aligned_n(" << aligned_n << ")");
+  NVM_DBG(this, "aligned_n(" << align_nbytes_read << ")");
   NVM_DBG(this, "aligned_offset(" << aligned_offset << ")");
   NVM_DBG(this, "skip_head_nbytes(" << skip_head_nbytes << ")");
   NVM_DBG(this, "skip_tail_nbytes(" << skip_tail_nbytes << ")");
