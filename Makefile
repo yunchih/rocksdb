@@ -40,7 +40,8 @@ quoted_perl_command = $(subst ','\'',$(perl_command))
 # `make install`
 
 # Set the default DEBUG_LEVEL to 1
-DEBUG_LEVEL?=1
+#DEBUG_LEVEL?=1
+DEBUG_LEVEL?=0
 
 ifeq ($(MAKECMDGOALS),dbg)
 	DEBUG_LEVEL=2
@@ -534,8 +535,7 @@ endif  # PLATFORM_SHARED_EXT
 	dbg rocksdbjavastatic rocksdbjava install install-static install-shared uninstall \
 	analyze tools tools_lib
 
-
-all: $(LIBRARY) $(BENCHMARKS) tools tools_lib test_libs $(TESTS)
+all: $(LIBRARY) $(BENCHMARKS) tools tools_lib
 
 static_lib: $(LIBRARY)
 
@@ -547,7 +547,7 @@ tools_lib: $(TOOLS_LIBRARY)
 
 test_libs: $(TEST_LIBS)
 
-dbg: $(LIBRARY) $(BENCHMARKS) tools $(TESTS)
+dbg: $(LIBRARY) $(BENCHMARKS) tools
 
 # creates static library and programs
 release:
