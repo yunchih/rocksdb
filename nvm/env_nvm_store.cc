@@ -325,6 +325,7 @@ struct nvm_vblk* NvmStore::get(void) {
         }
         break;
       }
+      break;
 
     case kOpen:
       entry.first = kReserved;

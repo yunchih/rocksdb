@@ -68,7 +68,7 @@ class BlockReadAmpBitmap {
 
     // Create bitmap and set all the bits to 0
     bitmap_ = new std::atomic<uint32_t>[bitmap_size];
-    memset(bitmap_, 0, bitmap_size * kBytesPersEntry);
+    memset(static_cast<void*>(bitmap_), 0, bitmap_size * kBytesPersEntry);
 
     RecordTick(GetStatistics(), READ_AMP_TOTAL_READ_BYTES, block_size);
   }
