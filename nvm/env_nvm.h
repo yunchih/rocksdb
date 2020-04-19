@@ -1,6 +1,8 @@
 #ifndef STORAGE_ROCKSDB_ENVNVM_H_
 #define STORAGE_ROCKSDB_ENVNVM_H_
 
+#include <cerrno>
+#include <cstring>
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -15,7 +17,7 @@
 #include "port/port.h"
 #include <liblightnvm.h>
 
-//#define NVM_DBG_ENABLED 1
+#define NVM_DBG_ENABLED 1
 #ifdef NVM_DBG_ENABLED
 
 inline std::string methodName(const std::string& prettyFunction) {
@@ -400,7 +402,7 @@ public:
 
   // Create the specified directory. Returns error if directory exists.
   virtual Status CreateDir(const std::string& dpath) override {
-    NVM_DBG(this, "delegating... dpath(" << dpath << ")");
+    // NVM_DBG(this, "delegating... dpath(" << dpath << ")");
     Status s = posix_->CreateDir(dpath);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -409,7 +411,7 @@ public:
   // Creates directory if it does not exist
   // Returns Ok if it exists, or successfully created. Non-OK otherwise.
   virtual Status CreateDirIfMissing(const std::string& dpath) override {
-    NVM_DBG(this, "delegating... dpath(" << dpath << ")");
+    // NVM_DBG(this, "delegating... dpath(" << dpath << ")");
     Status s = posix_->CreateDirIfMissing(dpath);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -417,7 +419,7 @@ public:
 
   // Delete the specified directory.
   virtual Status DeleteDir(const std::string& dpath) override {
-    NVM_DBG(this, "delegating... dpath(" << dpath << ")");
+    // NVM_DBG(this, "delegating... dpath(" << dpath << ")");
     Status s = posix_->DeleteDir(dpath);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -463,7 +465,7 @@ public:
   virtual Status NewLogger(
     const std::string& fpath, shared_ptr<Logger>* result
   ) {
-    NVM_DBG(this, "delegating... fpath(" << fpath << ")");
+    // NVM_DBG(this, "delegating... fpath(" << fpath << ")");
     Status s = posix_->NewLogger(fpath, result);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -483,7 +485,7 @@ public:
   //
   // May create the named file if it does not already exist.
   virtual Status LockFile(const std::string& fpath, FileLock** lock) override {
-    NVM_DBG(this, "delegating... fpath(" << fpath << ")");
+    // NVM_DBG(this, "delegating... fpath(" << fpath << ")");
     Status s = posix_->LockFile(fpath, lock);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -493,7 +495,7 @@ public:
   // REQUIRES: lock was returned by a successful LockFile() call
   // REQUIRES: lock has not already been unlocked.
   virtual Status UnlockFile(FileLock* lock) override {
-    NVM_DBG(this, "lock(" << lock << ") -- delegating");
+    // NVM_DBG(this, "lock(" << lock << ") -- delegating");
     Status s = posix_->UnlockFile(lock);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -518,7 +520,7 @@ public:
 
   // Get the number of seconds since the Epoch, 1970-01-01 00:00:00 (UTC).
   virtual Status GetCurrentTime(int64_t* unix_time) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     Status s = posix_->GetCurrentTime(unix_time);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -526,7 +528,7 @@ public:
 
   // Converts seconds-since-Jan-01-1970 to a printable string
   virtual std::string TimeToString(uint64_t stamp) override {
-    NVM_DBG(this, "delegating...  stamp(" << stamp << ")");
+    // NVM_DBG(this, "delegating...  stamp(" << stamp << ")");
     std::string time = posix_->TimeToString(stamp);
     NVM_DBG(this, "time(" << time << ")");
     return time;
@@ -534,7 +536,7 @@ public:
 
   // Get the current host name.
   virtual Status GetHostName(char* name, uint64_t len) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     Status s = posix_->GetHostName(name, len);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -545,7 +547,7 @@ public:
     const std::string& db_path,
     std::string* output_path
   ) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     Status s = posix_->GetAbsolutePath(db_path, output_path);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -556,7 +558,7 @@ public:
   // between runs of the same process, but subsequent calls will return the
   // same directory.
   virtual Status GetTestDirectory(std::string* dpath) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     Status s = posix_->GetTestDirectory(dpath);
     NVM_DBG(this, "Status(" << s.ToString() << ")");
     return s;
@@ -579,33 +581,33 @@ public:
     void* tag = nullptr,
     void (*unschedFunction)(void* arg) = 0
   ) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     posix_->Schedule(function, arg, pri, tag, unschedFunction);
   }
 
   // Arrange to remove jobs for given arg from the queue_ if they are not
   // already scheduled. Caller is expected to have exclusive lock on arg.
   virtual int UnSchedule(void* arg, Priority pri) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     return posix_->UnSchedule(arg, pri);
   }
 
   // Start a new thread, invoking "function(arg)" within the new thread.
   // When "function(arg)" returns, the thread will be destroyed.
   virtual void StartThread(void (*function)(void* arg), void* arg) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     posix_->StartThread(function ,arg);
   }
 
   // Wait for all threads started by StartThread to terminate.
   virtual void WaitForJoin(void) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     posix_->WaitForJoin();
   }
 
   // Get thread pool queue length for specific thrad pool.
   virtual unsigned int GetThreadPoolQueueLen(Priority pri = LOW) const override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     return posix_->GetThreadPoolQueueLen(pri);
   }
 
@@ -613,7 +615,7 @@ public:
   // for this environment. 'LOW' is the default pool.
   // default number: 1
   virtual void SetBackgroundThreads(int number, Priority pri = LOW) override {
-    NVM_DBG(this, "delegating... number(" <<number<< "), pri(" <<pri<< ")");
+    // NVM_DBG(this, "delegating... number(" <<number<< "), pri(" <<pri<< ")");
     posix_->SetBackgroundThreads(number, pri);
   }
 
@@ -621,19 +623,19 @@ public:
   // for this environment if it is smaller than specified. 'LOW' is the default
   // pool.
   virtual void IncBackgroundThreadsIfNeeded(int number, Priority pri) override {
-    NVM_DBG(this, "delegating... number(" <<number<< ", pri(" <<pri<< ")");
+    // NVM_DBG(this, "delegating... number(" <<number<< ", pri(" <<pri<< ")");
     posix_->IncBackgroundThreadsIfNeeded(number, pri);
   }
 
   // Lower IO priority for threads from the specified pool.
   virtual void LowerThreadPoolIOPriority(Priority pool = LOW) override {
-    NVM_DBG(this, "delegating... pool(" << pool << ")");
+    // NVM_DBG(this, "delegating... pool(" << pool << ")");
     posix_->LowerThreadPoolIOPriority(pool);
   }
 
   // Sleep/delay the thread for the perscribed number of micro-seconds.
   virtual void SleepForMicroseconds(int micros) override {
-    NVM_DBG(this, "delegating... micros(" << micros << ")");
+    // NVM_DBG(this, "delegating... micros(" << micros << ")");
     posix_->SleepForMicroseconds(micros);
   }
 
@@ -641,7 +643,7 @@ public:
   virtual Status GetThreadList(
     std::vector<ThreadStatus>* thread_list
   ) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     return posix_->GetThreadList(thread_list);
   }
 
@@ -649,19 +651,19 @@ public:
   // used in RocksDB internally to update thread status and supports
   // GetThreadList().
   virtual ThreadStatusUpdater* GetThreadStatusUpdater() const override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     return posix_->GetThreadStatusUpdater();
   }
 
   // Returns the ID of the current thread.
   virtual uint64_t GetThreadID(void) const override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     return posix_->GetThreadID();
   }
 
   // Generates a unique id that can be used to identify a db
   virtual std::string GenerateUniqueId(void) override {
-    NVM_DBG(this, "delegating...");
+    // NVM_DBG(this, "delegating...");
     std::string uid = posix_->GenerateUniqueId();
     NVM_DBG(this, "uid(" << uid << ")");
     return uid;

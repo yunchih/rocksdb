@@ -124,9 +124,7 @@ size_t NvmFile::GetRequiredBufferAlignment(void) const {
 }
 
 void NvmFile::Ref(void) {
-  NVM_DBG(this, "LOCK ?");
   MutexLock lock(&refs_mutex_);
-  NVM_DBG(this, "LOCK !");
 
   NVM_DBG(this, "refs_(" << refs_ << ")");
 
@@ -141,9 +139,7 @@ void NvmFile::Unref(void) {
   bool do_delete = false;
 
   {
-    NVM_DBG(this, "LOCK ?");
     MutexLock lock(&refs_mutex_);
-    NVM_DBG(this, "LOCK !");
 
     --refs_;
     if (refs_ < 0) {
