@@ -15,6 +15,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DROCKSDB_BACKTRACE")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DROCKSDB_PLATFORM_POSIX")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DROCKSDB_LIB_IO_POSIX")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DOS_LINUX")
+SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -fopenmp")
+
 
 set(HEADER_FILES
   args.h
@@ -46,6 +48,12 @@ set(SOURCE_FILES_T03
   env_nvm_file.cc
   tests/env_nvm_t03.cc)
 
+set(SOURCE_FILES_T04
+  env_nvm.cc
+  env_nvm_store.cc
+  env_nvm_file.cc
+  tests/env_nvm_randomread.cc)
+
 include_directories(../include)
 include_directories(../)
 include_directories(${CMAKE_SOURCE_DIR})
@@ -65,8 +73,8 @@ add_executable(env_nvm_t02 ${HEADER_FILES} ${SOURCE_FILES_T02})
 target_link_libraries(env_nvm_t02 pthread
 	rt gflags z bz2 zstd snappy ${LIB_RDB} pthread ${LIBLIGHTNVM})
 
-add_executable(env_nvm_t03 ${HEADER_FILES} ${SOURCE_FILES_T03})
-target_link_libraries(env_nvm_t03 pthread
+add_executable(env_nvm_randomread ${HEADER_FILES} ${SOURCE_FILES_T04})
+target_link_libraries(env_nvm_randomread pthread
 	rt gflags z bz2 zstd snappy ${LIB_RDB} pthread ${LIBLIGHTNVM})
 
 install(TARGETS env_nvm_t01 DESTINATION bin)
